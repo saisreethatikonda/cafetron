@@ -27,9 +27,7 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**").permitAll()  // public: login, register
-                        .requestMatchers("/test").permitAll()          // your test endpoint
-                        .anyRequest().authenticated()                  // everything else needs JWT
+                        .anyRequest().permitAll()
                 );
 
         return http.build();
