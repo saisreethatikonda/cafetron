@@ -20,16 +20,17 @@ public class VendorOrderStatus {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "orderItem_id", nullable = false)
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "orderItem_id", nullable = false, unique = true)
     private OrderItem orderItem;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "vendor_id", nullable = false)
     private Vendor vendor;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "status")
-    private String status;
+    private VendorOrderStatusType status;
 
     @Column(name = "declined_reason")
     private String declinedReason;
