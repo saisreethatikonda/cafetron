@@ -1,6 +1,6 @@
 package com.cafetron.vendor;
 
-import com.cafetron.menu.MenuItem;
+import com.cafetron.menu.entity.MenuItem;
 import com.cafetron.pickup.VendorOrderStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
