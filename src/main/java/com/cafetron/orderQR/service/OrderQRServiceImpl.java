@@ -2,18 +2,22 @@ package com.cafetron.orderQR.service;
 
 import com.cafetron.order.Order;
 import com.cafetron.orderQR.entity.OrderQR;
+import com.cafetron.orderQR.exception.QRDecodeException;
 import com.cafetron.orderQR.exception.QRGenerationException;
 import com.cafetron.orderQR.repository.OrderQRRepository;
-import com.google.zxing.BarcodeFormat;
-import com.google.zxing.MultiFormatWriter;
-import com.google.zxing.WriterException;
+import com.google.zxing.*;
+import com.google.zxing.client.j2se.BufferedImageLuminanceSource;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
+import com.google.zxing.common.HybridBinarizer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -58,6 +62,23 @@ public class OrderQRServiceImpl implements OrderQRService {
         }
 
         return null;
+    }
+
+    @Override
+    public String decodeQRFromImage(MultipartFile file) {
+        try {
+            BufferedImage image = ImageIO.read(file.getInputStream());
+            LuminanceSource source = new BufferedImageLuminanceSource(image);
+            BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));
+
+            Result result = new MultiFormatReader().decode(bitmap);
+
+            return result.getText();
+        } catch (NotFoundException e) {
+            throw new QRDecodeException("No QR found in image!");
+        } catch (IOException e) {
+            throw new QRDecodeException("Failed to read image!");
+        }
     }
 
      private String encodeTokenToQR( String token ) {
