@@ -34,23 +34,23 @@ import java.util.List;
         }
 
         @GetMapping("/{id}")                               // GET /vendors/5
-        public VendorResponse getById(@PathVariable Long id) {
-            return vendorService.getById(id);
+        public VendorResponse getById(@PathVariable Long vendorId) {
+            return vendorService.getById(vendorId);
         }
 
         @PutMapping("/{id}")                               // PUT /vendors/5
-        public VendorResponse update(@PathVariable Long id,
+        public VendorResponse update(@PathVariable Long vendorId,
                                      @Valid @RequestBody VendorRequest request) {
-            return vendorService.update(id, request);
+            return vendorService.update(vendorId, request);
         }
 
         @PatchMapping("/{id}/active")                      // PATCH /vendors/5/active?active=false
-        public VendorResponse setActive(@PathVariable Long id, @RequestParam boolean active) {
-            return vendorService.setActive(id, active);
+        public VendorResponse setActive(@PathVariable Long vendorId, @RequestParam boolean active) {
+            return vendorService.setActive(vendorId, active);
         }
 
         @DeleteMapping("/{id}")                            // DELETE /vendors/5
-        public void delete(@PathVariable Long id) {
-            vendorService.delete(id);
+        public void delete(@PathVariable Long vendorId) {
+            vendorService.delete(vendorId);
         }
 }
