@@ -2,7 +2,7 @@ package com.cafetron.admin.repository;
 
 import com.cafetron.admin.dto.DailySummaryDTO;
 import com.cafetron.admin.dto.StatusCountDTO;
-import com.cafetron.order.Order;
+import com.cafetron.order.entity.Order;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
