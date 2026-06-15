@@ -1,0 +1,60 @@
+package com.cafetron.admin.repository;
+
+import com.cafetron.admin.dto.DailySummaryDTO;
+import com.cafetron.admin.dto.StatusCountDTO;
+import com.cafetron.order.Order;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDate;
+import java.util.List;
+
+@Repository
+public interface ReportOrderRepository extends JpaRepository<Order, Long> {
+
+    @Query("""
+        SELECT new com.cafetron.admin.dto.DailySummaryDTO(
+            COUNT(DISTINCT o.id),
+            COALESCE(SUM(o.totalAmount), 0),
+            COALESCE(SUM(oi.quantity), 0)
+        )
+        FROM Order o
+        LEFT JOIN OrderItem oi ON oi.order = o
+        WHERE DATE(o.createdAt) = :date
+          AND o.overallStatus NOT IN ('CANCELLED', 'VENDOR_DECLINED')
+        GROUP BY DATE(o.createdAt)
+    """)
+    DailySummaryDTO getDailySummary(@Param("date") LocalDate date);
+
+    // ─────────────────────────────────────────────────────────────────
+    // Native query — avoids Hibernate translating CAST in a way
+    // MySQL only_full_group_by rejects.
+    // Returns Object[] rows: [0]=date string, [1]=revenue BigDecimal
+    // Mapped to RevenuePointDTO in ReportService.
+    // ─────────────────────────────────────────────────────────────────
+    @Query(value = """
+        SELECT DATE(created_at) as date, COALESCE(SUM(total_amount), 0) as revenue
+        FROM `Order`
+        WHERE DATE(created_at) BETWEEN :from AND :to
+          AND overall_status NOT IN ('CANCELLED', 'VENDOR_DECLINED')
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at) ASC
+    """, nativeQuery = true)
+    List<Object[]> getRevenueRangeRaw(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
+
+    @Query("""
+        SELECT new com.cafetron.admin.dto.StatusCountDTO(
+            o.overallStatus,
+            COUNT(o)
+        )
+        FROM Order o
+        WHERE DATE(o.createdAt) = :date
+        GROUP BY o.overallStatus
+        ORDER BY COUNT(o) DESC
+    """)
+    List<StatusCountDTO> getStatusBreakdown(@Param("date") LocalDate date);
+}
