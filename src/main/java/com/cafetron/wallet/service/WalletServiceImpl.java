@@ -48,4 +48,22 @@ public class WalletServiceImpl implements WalletService {
         transaction.setType(TransactionType.DEBIT);
         transactionRepository.save(transaction);
     }
+
+    @Override
+    @Transactional
+    public void refund(Long userId, BigDecimal amount, String description) {
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new IllegalArgumentException("Wallet not found for user: " + userId));
+
+        wallet.setBalance(wallet.getBalance().add(amount));
+        walletRepository.save(wallet);
+
+        Transaction transaction = new Transaction();
+        transaction.setWalletId(wallet.getId());
+        transaction.setAmount(amount);
+        transaction.setDescription(description);
+        transaction.setType(TransactionType.REFUND);
+        transactionRepository.save(transaction);
+    }
 }
+

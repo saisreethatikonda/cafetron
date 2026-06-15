@@ -4,22 +4,20 @@ import com.cafetron.cart.entity.OrderItem;
 import com.cafetron.cart.repository.OrderItemRepository;
 import com.cafetron.menu.entity.MenuItem;
 import com.cafetron.menu.repository.MenuItemRepository;
-import com.cafetron.order.dto.PlaceOrderItemRequest;
-import com.cafetron.order.dto.PlaceOrderRequest;
-import com.cafetron.order.dto.PlaceOrderResponse;
+import com.cafetron.order.dto.*;
 import com.cafetron.order.entity.Order;
 import com.cafetron.order.repository.OrderRepository;
+import com.cafetron.orderQR.service.OrderQRService;
+import com.cafetron.pickup.VendorOrderStatus;
+import com.cafetron.pickup.VendorOrderStatusType;
+import com.cafetron.pickup.repository.VendorOrderStatusRepository;
 import com.cafetron.wallet.service.WalletService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -28,17 +26,23 @@ public class OrderServiceImpl implements OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final WalletService walletService;
+    private final OrderQRService orderQRService;
+    private final VendorOrderStatusRepository vendorOrderStatusRepository;
 
     public OrderServiceImpl(
             MenuItemRepository menuItemRepository,
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
-            WalletService walletService
+            WalletService walletService,
+            OrderQRService orderQRService,
+            VendorOrderStatusRepository vendorOrderStatusRepository
     ) {
         this.menuItemRepository = menuItemRepository;
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.walletService = walletService;
+        this.orderQRService = orderQRService;
+        this.vendorOrderStatusRepository = vendorOrderStatusRepository;
     }
 
     @Override
@@ -48,27 +52,24 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalArgumentException("Order must contain at least one item.");
         }
 
-        // Store the details after deconstructing the request
+        // Slice 3: sort items by menuItemId ascending to guarantee consistent lock order
+        // prevents deadlock when two concurrent requests share some menu items
+        List<PlaceOrderItemRequest> sortedItems = request.items().stream()
+                .sorted(Comparator.comparing(PlaceOrderItemRequest::menuItemId))
+                .toList();
+
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderItem> orderItems = new ArrayList<>();
         Set<Long> uniqueVendorIds = new HashSet<>();
 
-        //Populate the order obj
         Order order = new Order();
         order.setUserId(userId);
-        // Current Order entity does not have pickupSlot/userId yet, so pickupSlot is stored in location.
-        order.setLocation(request.pickupSlot());
+        order.setPickupSlot(request.pickupSlot());
         order.setOverallStatus("PLACED");
         order.setPaymentStatus("PAID");
-        order.setToken(UUID.randomUUID().toString());
         order.setCreatedAt(LocalDateTime.now());
 
-        for (PlaceOrderItemRequest itemRequest : request.items()) {
-            if (itemRequest.quantity() <= 0) {
-                throw new IllegalArgumentException("Quantity must be greater than 0.");
-            }
-
-            //using optional enables us to handle null checks safely
+        for (PlaceOrderItemRequest itemRequest : sortedItems) {
             MenuItem menuItem = menuItemRepository.findByIdForUpdate(itemRequest.menuItemId())
                     .orElseThrow(() -> new IllegalArgumentException("Menu item not found: " + itemRequest.menuItemId()));
 
@@ -84,7 +85,6 @@ public class OrderServiceImpl implements OrderService {
                 menuItem.setAvailable(false);
             }
 
-            //Basic calc for deciding the bill
             BigDecimal unitPrice = BigDecimal.valueOf(menuItem.getPrice());
             BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(itemRequest.quantity()));
             totalAmount = totalAmount.add(lineTotal);
@@ -105,13 +105,33 @@ public class OrderServiceImpl implements OrderService {
         order.setVendorCount(uniqueVendorIds.size());
         order.setVendorAcceptedCount(0);
 
-        walletService.debit(userId,totalAmount,"Order placement");
+        walletService.debit(userId, totalAmount, "Order placement");
 
         Order savedOrder = orderRepository.save(order);
+
+        // assign saved order back to each item before saving
         for (OrderItem orderItem : orderItems) {
             orderItem.setOrder(savedOrder);
         }
-        orderItemRepository.saveAll(orderItems);
+        List<OrderItem> savedItems = orderItemRepository.saveAll(orderItems);
+
+        // Slice 4a: create one VendorOrderStatus row per order item (PENDING, 30-min window)
+        List<VendorOrderStatus> vendorStatuses = new ArrayList<>();
+        for (OrderItem savedItem : savedItems) {
+            VendorOrderStatus vs = new VendorOrderStatus();
+            vs.setOrderItem(savedItem);
+            vs.setVendor(savedItem.getMenuItem().getVendor());
+            vs.setStatus(VendorOrderStatusType.PENDING);
+            vs.setActionExpiresAt(LocalDateTime.now().plusMinutes(30));
+            vs.setCreatedAt(LocalDateTime.now());
+            vendorStatuses.add(vs);
+        }
+        vendorOrderStatusRepository.saveAll(vendorStatuses);
+
+        // Slice 4b: generate real QR token via OrderQRService (stores base64 QR in OrderQR table)
+        String token = orderQRService.generateAndStoreQR(savedOrder);
+        savedOrder.setToken(token);
+        orderRepository.save(savedOrder);
 
         return new PlaceOrderResponse(
                 savedOrder.getId(),
@@ -120,5 +140,112 @@ public class OrderServiceImpl implements OrderService {
                 savedOrder.getTotalAmount(),
                 savedOrder.getToken()
         );
+    }
+
+    @Override
+    public List<MyOrderSummaryResponse> getMyOrders(Long userId){
+        List <Order> allOrders =  orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
+
+        List<MyOrderSummaryResponse> myOrders = new ArrayList<>();
+        for (Order order : allOrders) {
+            MyOrderSummaryResponse dto = new MyOrderSummaryResponse(
+                    order.getId(),
+                    order.getOverallStatus(),
+                    order.getPaymentStatus(),
+                    order.getTotalAmount(),
+                    order.getPickupSlot(),
+                    order.getLocation(),
+                    order.getCreatedAt()
+            );
+            myOrders.add(dto);
+        }
+        return myOrders;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OrderDetailResponse getOrderDetail(Long userId, Long orderId) {
+        // 1. fetch order, 404 if not found
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
+
+        // 2. ownership check — reject if order belongs to a different user
+        if (!order.getUserId().equals(userId)) {
+            throw new SecurityException("Access denied: order does not belong to this user.");
+        }
+
+        // 3. fetch all order items for this order (menuItem loaded via join)
+        List<OrderItem> orderItems = orderItemRepository.findByOrder_Id(orderId);
+
+        // fetch vendor status rows and index by orderItem id for O(1) lookup during mapping
+        Map<Long, VendorOrderStatusType> statusByOrderItemId = new HashMap<>();
+        for (VendorOrderStatus vendorStatus : vendorOrderStatusRepository.findByOrderItem_Order_Id(orderId)) {
+            statusByOrderItemId.put(vendorStatus.getOrderItem().getId(), vendorStatus.getStatus());
+        }
+
+        // 4. map each OrderItem -> OrderDetailItemResponse
+        List<OrderDetailItemResponse> itemResponses = new ArrayList<>();
+        for (OrderItem oi : orderItems) {
+            VendorOrderStatusType vendorStatus = statusByOrderItemId.getOrDefault(oi.getId(), VendorOrderStatusType.PENDING);
+            itemResponses.add(new OrderDetailItemResponse(
+                    oi.getMenuItem().getId(),
+                    oi.getMenuItem().getItemName(),
+                    oi.getQuantity(),
+                    oi.getUnitPrice(),
+                    vendorStatus.name()
+            ));
+        }
+
+        // 5. assemble top-level response
+        return new OrderDetailResponse(
+                order.getId(),
+                order.getOverallStatus(),
+                order.getPaymentStatus(),
+                order.getTotalAmount(),
+                order.getPickupSlot(),
+                order.getLocation(),
+                order.getToken(),
+                order.getCreatedAt(),
+                itemResponses
+        );
+    }
+
+    @Override
+    @Transactional
+    public OrderDetailResponse processTimeout(Long userId, Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
+
+        if (!order.getUserId().equals(userId)) {
+            throw new SecurityException("Access denied: order does not belong to this user.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        List<VendorOrderStatus> statuses = vendorOrderStatusRepository.findByOrderItem_Order_Id(orderId);
+
+        boolean timeoutApplied = false;
+        for (VendorOrderStatus status : statuses) {
+            boolean isPending = status.getStatus() == VendorOrderStatusType.PENDING;
+            boolean isExpired = status.getActionExpiresAt() != null && !status.getActionExpiresAt().isAfter(now);
+            if (isPending && isExpired) {
+                status.setStatus(VendorOrderStatusType.TIMEOUT);
+                status.setActionedAt(now);
+                timeoutApplied = true;
+            }
+        }
+
+        if (timeoutApplied) {
+            vendorOrderStatusRepository.saveAll(statuses);
+
+            if (!"REFUNDED".equalsIgnoreCase(order.getPaymentStatus())) {
+                walletService.refund(userId, order.getTotalAmount(), "Order timeout refund");
+            }
+
+            order.setOverallStatus("TIMEOUT");
+            order.setPaymentStatus("REFUNDED");
+            orderRepository.save(order);
+        }
+
+        return getOrderDetail(userId, orderId);
     }
 }
