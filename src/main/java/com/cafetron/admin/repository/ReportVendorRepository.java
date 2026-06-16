@@ -25,8 +25,7 @@ public interface ReportVendorRepository extends JpaRepository<Vendor, Long> {
         JOIN vos.orderItem oi
         JOIN oi.order o
         LEFT JOIN com.cafetron.wallet.entity.Transaction t
-            ON t.orderId = o.id
-            AND t.vendorId = v.id
+            ON t.order = o
             AND t.type = com.cafetron.wallet.entity.TransactionType.REFUND
         WHERE vos.status IN (
             com.cafetron.pickup.VendorOrderStatusType.DECLINED,

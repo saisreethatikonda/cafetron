@@ -35,6 +35,7 @@ public class Vendor {
     private String contactPerson;
 
     @Column(name = "is_active", nullable = false)
+    @Builder.Default
     private boolean isActive = true;
 
     @Column(name = "created_at", updatable = false)

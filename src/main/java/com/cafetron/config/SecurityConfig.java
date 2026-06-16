@@ -2,10 +2,10 @@ package com.cafetron.config;
 
 import com.cafetron.security.CustomAuthEntryPoint;
 import com.cafetron.security.JwtFilter;
+import com.cafetron.security.JwtUtil;
 import com.cafetron.security.UserDetailsServiceImpl;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -24,18 +24,23 @@ import org.springframework.web.cors.CorsConfigurationSource;
 public class SecurityConfig {
 
     private final CorsConfigurationSource corsConfigurationSource;
-    private final JwtFilter jwtFilter;
     private final UserDetailsServiceImpl userDetailsService;
     private final CustomAuthEntryPoint customAuthEntryPoint;
+    private final JwtUtil jwtUtil;
 
     public SecurityConfig(CorsConfigurationSource corsConfigurationSource,
-                          @Lazy JwtFilter jwtFilter,
-                          @Lazy UserDetailsServiceImpl userDetailsService,
-                          CustomAuthEntryPoint customAuthEntryPoint) {
+                          UserDetailsServiceImpl userDetailsService,
+                          CustomAuthEntryPoint customAuthEntryPoint,
+                          JwtUtil jwtUtil) {
         this.corsConfigurationSource = corsConfigurationSource;
-        this.jwtFilter = jwtFilter;
         this.userDetailsService = userDetailsService;
         this.customAuthEntryPoint = customAuthEntryPoint;
+        this.jwtUtil = jwtUtil;
+    }
+
+    @Bean
+    public JwtFilter jwtFilter() {
+        return new JwtFilter(jwtUtil, userDetailsService);
     }
 
     @Bean
@@ -75,7 +80,7 @@ public class SecurityConfig {
                                 .anyRequest().permitAll()
                 )
                 .authenticationProvider(authenticationProvider())
-                .addFilterBefore(jwtFilter,
+                .addFilterBefore(jwtFilter(),
                         UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
