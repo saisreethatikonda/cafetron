@@ -8,6 +8,8 @@ import com.cafetron.security.UserDetailsServiceImpl;
 import com.cafetron.security.UserPrincipal;
 import com.cafetron.user.User;
 import com.cafetron.user.repository.UserRepository;
+import com.cafetron.vendor.entity.Vendor;
+import com.cafetron.vendor.repository.VendorRepository;
 import com.cafetron.wallet.entity.Transaction;
 import com.cafetron.wallet.entity.TransactionType;
 import com.cafetron.wallet.entity.Wallet;
@@ -34,6 +36,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserDetailsServiceImpl userDetailsService;
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
+    private final VendorRepository vendorRepository;
 
     public AuthServiceImpl(UserRepository userRepository,
                            PasswordEncoder passwordEncoder,
@@ -41,7 +44,8 @@ public class AuthServiceImpl implements AuthService {
                            AuthenticationManager authenticationManager,
                            UserDetailsServiceImpl userDetailsService,
                            WalletRepository walletRepository,
-                           TransactionRepository transactionRepository) {
+                           TransactionRepository transactionRepository,
+                           VendorRepository vendorRepository) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
@@ -49,6 +53,7 @@ public class AuthServiceImpl implements AuthService {
         this.userDetailsService = userDetailsService;
         this.walletRepository = walletRepository;
         this.transactionRepository = transactionRepository;
+        this.vendorRepository = vendorRepository;
     }
 
     @Override
@@ -72,12 +77,11 @@ public class AuthServiceImpl implements AuthService {
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         user.setEmployeeId(request.getEmployeeId());
         user.setDepartment(request.getDepartment());
-        user.setRole(request.getRole() != null
-                ? request.getRole().toUpperCase()
-                : "EMPLOYEE");
+        user.setRole(normalizeRole(request.getRole()));
         user.setCreatedAt(LocalDateTime.now());
 
         userRepository.save(user);
+        createVendorProfileIfNeeded(user);
 
         // Auto-create wallet for newly registered users so order placement can debit immediately.
         Wallet wallet = new Wallet();
@@ -100,7 +104,7 @@ public class AuthServiceImpl implements AuthService {
                 token,
                 user.getEmail(),
                 user.getName(),
-                user.getRole()
+                principal.getRole()
         );
     }
 
@@ -128,7 +132,30 @@ public class AuthServiceImpl implements AuthService {
                 token,
                 user.getEmail(),
                 user.getName(),
-                user.getRole()
+                principal.getRole()
         );
+    }
+
+    private void createVendorProfileIfNeeded(User user) {
+        if (!"VENDOR".equals(normalizeRole(user.getRole())) || vendorRepository.existsByEmail(user.getEmail())) {
+            return;
+        }
+
+        Vendor vendor = new Vendor();
+        vendor.setName(user.getName());
+        vendor.setEmail(user.getEmail());
+        vendor.setContactPerson(user.getName());
+        vendor.setActive(true);
+        vendor.setCreatedAt(LocalDateTime.now());
+        vendorRepository.save(vendor);
+    }
+
+    private String normalizeRole(String role) {
+        if (role == null || role.isBlank()) {
+            return "EMPLOYEE";
+        }
+
+        String normalizedRole = role.trim().replaceFirst("^ROLE_", "").toUpperCase();
+        return "COUNTER".equals(normalizedRole) ? "VENDOR" : normalizedRole;
     }
 }

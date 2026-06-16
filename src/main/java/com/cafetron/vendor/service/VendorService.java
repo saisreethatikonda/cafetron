@@ -14,14 +14,14 @@ import java.util.Locale;
 @Service
 @Transactional
 public class VendorService {
-    private static final String ROLE_COUNTER = "COUNTER";
     private static final String ROLE_ADMIN = "ADMIN";
+    private static final String ROLE_VENDOR = "VENDOR";
     private final VendorRepository vendorRepository;
     public VendorService(VendorRepository vendorRepository) {
         this.vendorRepository = vendorRepository;
     }
     public VendorResponse create(UserPrincipal principal, VendorRequest request) {
-        requireCounterOrAdmin(principal);
+        requireAdmin(principal);
         if (vendorRepository.existsByEmail(request.email())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Vendor email already exists");
         }
@@ -35,21 +35,28 @@ public class VendorService {
         return toResponse(vendorRepository.save(vendor));
     }
     public VendorResponse getById(UserPrincipal principal, Long vendorId) {
-        requireCounterOrAdmin(principal);
         Vendor vendor = vendorRepository.findById(vendorId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Vendor not found"));
+        requireAdminOrSameVendor(principal, vendor);
         return toResponse(vendor);
     }
     public List<VendorResponse> getAll(UserPrincipal principal) {
-        requireCounterOrAdmin(principal);
+        requireVendorOrAdmin(principal);
+        if (isVendor(principal)) {
+            return List.of(toResponse(getVendorForPrincipal(principal)));
+        }
         return vendorRepository.findAll().stream().map(this::toResponse).toList();
     }
     public List<VendorResponse> getActive(UserPrincipal principal) {
-        requireCounterOrAdmin(principal);
+        requireVendorOrAdmin(principal);
+        if (isVendor(principal)) {
+            Vendor vendor = getVendorForPrincipal(principal);
+            return vendor.isActive() ? List.of(toResponse(vendor)) : List.of();
+        }
         return vendorRepository.findByIsActiveTrue().stream().map(this::toResponse).toList();
     }
     public VendorResponse update(UserPrincipal principal, Long vendorId, VendorRequest request) {
-        requireCounterOrAdmin(principal);
+        requireAdmin(principal);
         Vendor vendor = vendorRepository.findById(vendorId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Vendor not found"));
         if (!vendor.getEmail().equalsIgnoreCase(request.email()) && vendorRepository.existsByEmail(request.email())) {
@@ -62,14 +69,14 @@ public class VendorService {
         return toResponse(vendorRepository.save(vendor));
     }
     public VendorResponse setActive(UserPrincipal principal, Long vendorId, boolean active) {
-        requireCounterOrAdmin(principal);
+        requireAdmin(principal);
         Vendor vendor = vendorRepository.findById(vendorId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Vendor not found"));
         vendor.setActive(active);
         return toResponse(vendorRepository.save(vendor));
     }
     public void delete(UserPrincipal principal, Long id) {
-        requireCounterOrAdmin(principal);
+        requireAdmin(principal);
         if (!vendorRepository.existsById(id)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Vendor not found");
         }
@@ -86,13 +93,57 @@ public class VendorService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
         }
     }
-    private void requireCounterOrAdmin(UserPrincipal principal) {
+    private void requireAdmin(UserPrincipal principal) {
         requireAuthenticated(principal);
-        String role = principal.getRole() == null
-                ? ""
-                : principal.getRole().trim().toUpperCase(Locale.ROOT);
-        if (!ROLE_COUNTER.equals(role) && !ROLE_ADMIN.equals(role)) {
+        if (!ROLE_ADMIN.equals(normalizedRole(principal))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to perform this action");
         }
+    }
+    private void requireVendorOrAdmin(UserPrincipal principal) {
+        requireAuthenticated(principal);
+        String role = normalizedRole(principal);
+        if (!ROLE_VENDOR.equals(role) && !ROLE_ADMIN.equals(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to perform this action");
+        }
+    }
+    private void requireAdminOrSameVendor(UserPrincipal principal, Vendor vendor) {
+        requireAuthenticated(principal);
+        if (isAdmin(principal)) {
+            return;
+        }
+        if (isVendor(principal) && principal.getUser().getEmail() != null
+                && principal.getUser().getEmail().equalsIgnoreCase(vendor.getEmail())) {
+            return;
+        }
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to perform this action");
+    }
+    private Vendor getVendorForPrincipal(UserPrincipal principal) {
+        String email = principal.getUser().getEmail();
+        if (email == null || email.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Vendor account is missing an email");
+        }
+        return vendorRepository.findByEmail(email)
+                .orElseGet(() -> createVendorProfile(principal));
+    }
+    private boolean isAdmin(UserPrincipal principal) {
+        return ROLE_ADMIN.equals(normalizedRole(principal));
+    }
+    private boolean isVendor(UserPrincipal principal) {
+        return principal != null && ROLE_VENDOR.equals(normalizedRole(principal));
+    }
+    private String normalizedRole(UserPrincipal principal) {
+        return principal.getRole() == null
+                ? ""
+                : principal.getRole().trim().replaceFirst("^ROLE_", "").toUpperCase(Locale.ROOT);
+    }
+
+    private Vendor createVendorProfile(UserPrincipal principal) {
+        Vendor vendor = new Vendor();
+        vendor.setName(principal.getUser().getName());
+        vendor.setEmail(principal.getUser().getEmail());
+        vendor.setContactPerson(principal.getUser().getName());
+        vendor.setActive(true);
+        vendor.setCreatedAt(LocalDateTime.now());
+        return vendorRepository.save(vendor);
     }
 }

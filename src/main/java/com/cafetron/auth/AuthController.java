@@ -47,7 +47,7 @@ public class AuthController {
                 "id",         user.getId(),
                 "name",       user.getName(),
                 "email",      user.getEmail(),
-                "role",       user.getRole(),
+                "role",       principal.getRole(),
                 "employeeId", user.getEmployeeId() != null
                         ? user.getEmployeeId() : "",
                 "department", user.getDepartment() != null

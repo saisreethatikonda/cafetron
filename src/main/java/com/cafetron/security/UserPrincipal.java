@@ -27,7 +27,7 @@ public class UserPrincipal implements UserDetails {
     }
 
     public String getRole() {
-        return user.getRole();
+        return normalizeRole(user.getRole());
     }
 
     // ── UserDetails contract ──────────────────────────────────────
@@ -35,7 +35,7 @@ public class UserPrincipal implements UserDetails {
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(
-                new SimpleGrantedAuthority("ROLE_" + user.getRole())
+                new SimpleGrantedAuthority("ROLE_" + getRole())
         );
     }
 
@@ -60,4 +60,13 @@ public class UserPrincipal implements UserDetails {
 
     @Override
     public boolean isEnabled()               { return true; }
+
+    private String normalizeRole(String role) {
+        if (role == null || role.isBlank()) {
+            return "";
+        }
+
+        String normalizedRole = role.trim().replaceFirst("^ROLE_", "").toUpperCase();
+        return "COUNTER".equals(normalizedRole) ? "VENDOR" : normalizedRole;
+    }
 }

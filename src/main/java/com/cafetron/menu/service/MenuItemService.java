@@ -12,14 +12,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 @Service
 @Transactional
 public class MenuItemService {
-    private static final String ROLE_COUNTER = "COUNTER";
     private static final String ROLE_ADMIN = "ADMIN";
+    private static final String ROLE_VENDOR = "VENDOR";
 
     private final MenuItemRepository menuItemRepository;
     private final VendorRepository vendorRepository;
@@ -31,9 +33,9 @@ public class MenuItemService {
     }
 
     public MenuItemResponse create(UserPrincipal principal, MenuItemRequest request) {
-        requireCounterOrAdmin(principal);
+        requireVendorOrAdmin(principal);
 
-        Vendor vendor = getActiveVendor(request.vendorId());
+        Vendor vendor = resolveVendorForRequest(principal, request.vendorId());
 
         MenuItem item = new MenuItem();
         item.setItemName(request.itemName());
@@ -55,7 +57,15 @@ public class MenuItemService {
     }
 
     public List<MenuItemResponse> getAll(UserPrincipal principal) {
-        requireCounterOrAdmin(principal);
+        requireVendorOrAdmin(principal);
+
+        if (isVendor(principal)) {
+            Vendor vendor = getVendorForPrincipal(principal);
+            return menuItemRepository.findByVendorId(vendor.getId())
+                    .stream()
+                    .map(this::toResponse)
+                    .toList();
+        }
 
         return menuItemRepository.findAll()
                 .stream()
@@ -64,12 +74,13 @@ public class MenuItemService {
     }
 
     public MenuItemResponse update(UserPrincipal principal, Long menuItemId, MenuItemRequest request) {
-        requireCounterOrAdmin(principal);
+        requireVendorOrAdmin(principal);
 
         MenuItem item = menuItemRepository.findById(menuItemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
 
-        Vendor vendor = getActiveVendor(request.vendorId());
+        requireVendorOwnsItemIfVendor(principal, item);
+        Vendor vendor = resolveVendorForRequest(principal, request.vendorId());
 
         item.setItemName(request.itemName());
         item.setPrice(request.price());
@@ -82,8 +93,11 @@ public class MenuItemService {
     }
 
     public void delete(UserPrincipal principal, Long menuItemId) {
-        requireCounterOrAdmin(principal);
-        menuItemRepository.deleteById(menuItemId);
+        requireVendorOrAdmin(principal);
+        MenuItem item = menuItemRepository.findById(menuItemId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
+        requireVendorOwnsItemIfVendor(principal, item);
+        menuItemRepository.delete(item);
     }
 
     public List<MenuItemResponse> getTodaysMenu(UserPrincipal principal) {
@@ -114,7 +128,7 @@ public class MenuItemService {
     }
 
     public MenuItemResponse setStock(UserPrincipal principal, Long menuItemId, int newStock) {
-        requireCounterOrAdmin(principal);
+        requireVendorOrAdmin(principal);
 
         if (newStock < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Stock cannot be negative");
@@ -122,16 +136,18 @@ public class MenuItemService {
 
         MenuItem item = menuItemRepository.findById(menuItemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
+        requireVendorOwnsItemIfVendor(principal, item);
         item.setStock(newStock);
         item.setAvailable(newStock > 0);
         return toResponse(menuItemRepository.save(item));
     }
 
     public MenuItemResponse setAvailability(UserPrincipal principal, Long menuItemId, boolean available) {
-        requireCounterOrAdmin(principal);
+        requireVendorOrAdmin(principal);
 
         MenuItem item = menuItemRepository.findById(menuItemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
+        requireVendorOwnsItemIfVendor(principal, item);
         if (available && item.getStock() == 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot make an item available with zero stock");
         }
@@ -148,6 +164,54 @@ public class MenuItemService {
         item.setStock(item.getStock() - quantity);
         item.setAvailable(item.getStock() > 0);
         return toResponse(menuItemRepository.save(item));
+    }
+
+    private Vendor resolveVendorForRequest(UserPrincipal principal, Long requestedVendorId) {
+        if (!isVendor(principal)) {
+            return getActiveVendor(requestedVendorId);
+        }
+
+        Vendor vendor = getVendorForPrincipal(principal);
+        if (requestedVendorId != null && !Objects.equals(vendor.getId(), requestedVendorId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Vendors can only manage their own menu items");
+        }
+        return vendor;
+    }
+
+    private Vendor getVendorForPrincipal(UserPrincipal principal) {
+        String email = principal.getUser().getEmail();
+        if (email == null || email.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Vendor account is missing an email");
+        }
+
+        Vendor vendor = vendorRepository.findByEmail(email)
+                .orElseGet(() -> createVendorProfile(principal));
+        if (!vendor.isActive()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Vendor account is inactive");
+        }
+        return vendor;
+    }
+
+    private Vendor createVendorProfile(UserPrincipal principal) {
+        Vendor vendor = new Vendor();
+        vendor.setName(principal.getUser().getName());
+        vendor.setEmail(principal.getUser().getEmail());
+        vendor.setContactPerson(principal.getUser().getName());
+        vendor.setActive(true);
+        vendor.setCreatedAt(LocalDateTime.now());
+        return vendorRepository.save(vendor);
+    }
+
+    private void requireVendorOwnsItemIfVendor(UserPrincipal principal, MenuItem item) {
+        if (!isVendor(principal)) {
+            return;
+        }
+
+        Vendor vendor = getVendorForPrincipal(principal);
+        Long itemVendorId = item.getVendor() == null ? null : item.getVendor().getId();
+        if (!Objects.equals(vendor.getId(), itemVendorId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Vendors can only manage their own menu items");
+        }
     }
 
     private Vendor getActiveVendor(Long vendorId) {
@@ -178,13 +242,21 @@ public class MenuItemService {
         }
     }
 
-    private void requireCounterOrAdmin(UserPrincipal principal) {
+    private void requireVendorOrAdmin(UserPrincipal principal) {
         requireAuthenticated(principal);
-        String role = principal.getRole() == null
-                ? ""
-                : principal.getRole().trim().toUpperCase(Locale.ROOT);
-        if (!ROLE_COUNTER.equals(role) && !ROLE_ADMIN.equals(role)) {
+        String role = normalizedRole(principal);
+        if (!ROLE_VENDOR.equals(role) && !ROLE_ADMIN.equals(role)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to perform this action");
         }
+    }
+
+    private boolean isVendor(UserPrincipal principal) {
+        return principal != null && ROLE_VENDOR.equals(normalizedRole(principal));
+    }
+
+    private String normalizedRole(UserPrincipal principal) {
+        return principal.getRole() == null
+                ? ""
+                : principal.getRole().trim().replaceFirst("^ROLE_", "").toUpperCase(Locale.ROOT);
     }
 }
