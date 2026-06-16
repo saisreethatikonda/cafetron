@@ -11,6 +11,6 @@ public record MenuItemRequest(
         @NotBlank String itemName,
         @Positive double price,
         @Min(0) int stock,
-        @NotNull String foodType,
+        @NotBlank String foodType,
         @NotNull Long vendorId
 ) {}

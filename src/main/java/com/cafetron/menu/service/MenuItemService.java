@@ -3,37 +3,38 @@ package com.cafetron.menu.service;
 import com.cafetron.menu.dto.MenuItemRequest;
 import com.cafetron.menu.dto.MenuItemResponse;
 import com.cafetron.menu.entity.MenuItem;
-import com.cafetron.vendor.entity.Vendor;
 import com.cafetron.menu.repository.MenuItemRepository;
-import com.cafetron.menu.repository.VendorRepository;
-
+import com.cafetron.security.UserPrincipal;
+import com.cafetron.vendor.entity.Vendor;
+import com.cafetron.vendor.repository.VendorRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Locale;
 
 @Service
 @Transactional
 public class MenuItemService {
+    private static final String ROLE_COUNTER = "COUNTER";
+    private static final String ROLE_ADMIN = "ADMIN";
+
     private final MenuItemRepository menuItemRepository;
     private final VendorRepository vendorRepository;
 
-    // Constructor injection
-    public MenuItemService(MenuItemRepository menuItemRepository, VendorRepository vendorRepository) {
+    public MenuItemService(MenuItemRepository menuItemRepository,
+                           VendorRepository vendorRepository) {
         this.menuItemRepository = menuItemRepository;
         this.vendorRepository = vendorRepository;
     }
 
-    // CREATE a new menu item from the incoming request.
-    public MenuItemResponse create(MenuItemRequest request) {
+    public MenuItemResponse create(UserPrincipal principal, MenuItemRequest request) {
+        requireCounterOrAdmin(principal);
 
-        // Find the vendor named in the request (error if missing).
-        Vendor vendor = vendorRepository.findById(request.vendorId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Vendor not found"));
+        Vendor vendor = getActiveVendor(request.vendorId());
 
-        // Build a new item and copy in the request's values.
         MenuItem item = new MenuItem();
         item.setItemName(request.itemName());
         item.setPrice(request.price());
@@ -42,33 +43,33 @@ public class MenuItemService {
         item.setVendor(vendor);
         item.setAvailable(request.stock() > 0);
 
-        // Save (INSERT) and return as a response.
-        MenuItem saved = menuItemRepository.save(item);
-        return toResponse(saved);
+        return toResponse(menuItemRepository.save(item));
     }
 
-    // READ one item by id.
-    public MenuItemResponse getById(Long menuItemId) {
+    public MenuItemResponse getById(UserPrincipal principal, Long menuItemId) {
+        requireAuthenticated(principal);
+
         MenuItem item = menuItemRepository.findById(menuItemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
         return toResponse(item);
     }
 
-    // READ every item (staff/admin view — includes hidden/out-of-stock ones).
-    public List<MenuItemResponse> getAll() {
+    public List<MenuItemResponse> getAll(UserPrincipal principal) {
+        requireCounterOrAdmin(principal);
+
         return menuItemRepository.findAll()
-                .stream() // go through each entity...
-                .map(this::toResponse) // ...convert each to a response...
-                .toList(); // ...collect into a list.
+                .stream()
+                .map(this::toResponse)
+                .toList();
     }
 
-    // UPDATE an existing item
-    public MenuItemResponse update(Long menuItemId, MenuItemRequest request) {
+    public MenuItemResponse update(UserPrincipal principal, Long menuItemId, MenuItemRequest request) {
+        requireCounterOrAdmin(principal);
+
         MenuItem item = menuItemRepository.findById(menuItemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
 
-        Vendor vendor = vendorRepository.findById(request.vendorId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Vendor not found"));
+        Vendor vendor = getActiveVendor(request.vendorId());
 
         item.setItemName(request.itemName());
         item.setPrice(request.price());
@@ -80,47 +81,55 @@ public class MenuItemService {
         return toResponse(menuItemRepository.save(item));
     }
 
-    // DELETE an item by id.
-    public void delete(Long menuItemId) {
+    public void delete(UserPrincipal principal, Long menuItemId) {
+        requireCounterOrAdmin(principal);
         menuItemRepository.deleteById(menuItemId);
     }
 
-    // --- Employee-facing reads ---
+    public List<MenuItemResponse> getTodaysMenu(UserPrincipal principal) {
+        requireAuthenticated(principal);
 
-    // Today's menu: available items from active vendors.
-    public List<MenuItemResponse> getTodaysMenu() {
         return menuItemRepository.findTodaysMenu()
-                .stream().map(this::toResponse).toList();
+                .stream()
+                .map(this::toResponse)
+                .toList();
     }
 
-    // Search today's menu by name.
-    public List<MenuItemResponse> search(String name) {
+    public List<MenuItemResponse> search(UserPrincipal principal, String name) {
+        requireAuthenticated(principal);
+
         return menuItemRepository.searchTodaysMenu(name)
-                .stream().map(this::toResponse).toList();
+                .stream()
+                .map(this::toResponse)
+                .toList();
     }
 
-    // Filter today's menu by dietary type.
-    public List<MenuItemResponse> filterByFoodType(String foodType) {
+    public List<MenuItemResponse> filterByFoodType(UserPrincipal principal, String foodType) {
+        requireAuthenticated(principal);
+
         return menuItemRepository.filterByFoodType(foodType)
-                .stream().map(this::toResponse).toList();
+                .stream()
+                .map(this::toResponse)
+                .toList();
     }
 
-    // --- Stock operations (with the auto-unavailable rule) ---
+    public MenuItemResponse setStock(UserPrincipal principal, Long menuItemId, int newStock) {
+        requireCounterOrAdmin(principal);
 
-    // Set an item's stock (e.g. the morning restock).
-    public MenuItemResponse setStock(Long menuItemId, int newStock) {
         if (newStock < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Stock cannot be negative");
         }
+
         MenuItem item = menuItemRepository.findById(menuItemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
         item.setStock(newStock);
-        item.setAvailable(newStock > 0); // auto rule: 0 -> hidden, else shown
+        item.setAvailable(newStock > 0);
         return toResponse(menuItemRepository.save(item));
     }
 
-    // Manually show/hide an item (override). Can't enable a zero-stock item.
-    public MenuItemResponse setAvailability(Long menuItemId, boolean available) {
+    public MenuItemResponse setAvailability(UserPrincipal principal, Long menuItemId, boolean available) {
+        requireCounterOrAdmin(principal);
+
         MenuItem item = menuItemRepository.findById(menuItemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
         if (available && item.getStock() == 0) {
@@ -130,7 +139,6 @@ public class MenuItemService {
         return toResponse(menuItemRepository.save(item));
     }
 
-    // Reduce stock when an order is placed.
     public MenuItemResponse decreaseStock(Long menuItemId, int quantity) {
         MenuItem item = menuItemRepository.findById(menuItemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Menu item not found"));
@@ -138,11 +146,19 @@ public class MenuItemService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Not enough stock");
         }
         item.setStock(item.getStock() - quantity);
-        item.setAvailable(item.getStock() > 0); // hide automatically if it hit 0
+        item.setAvailable(item.getStock() > 0);
         return toResponse(menuItemRepository.save(item));
     }
 
-    // Converts a database entity into the response DTO sent to the frontend.
+    private Vendor getActiveVendor(Long vendorId) {
+        Vendor vendor = vendorRepository.findById(vendorId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Vendor not found"));
+        if (!vendor.isActive()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot assign menu items to an inactive vendor");
+        }
+        return vendor;
+    }
+
     private MenuItemResponse toResponse(MenuItem item) {
         return new MenuItemResponse(
                 item.getId(),
@@ -154,5 +170,21 @@ public class MenuItemService {
                 item.getVendor().getId(),
                 item.getVendor().getName()
         );
+    }
+
+    private void requireAuthenticated(UserPrincipal principal) {
+        if (principal == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+    }
+
+    private void requireCounterOrAdmin(UserPrincipal principal) {
+        requireAuthenticated(principal);
+        String role = principal.getRole() == null
+                ? ""
+                : principal.getRole().trim().toUpperCase(Locale.ROOT);
+        if (!ROLE_COUNTER.equals(role) && !ROLE_ADMIN.equals(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have permission to perform this action");
+        }
     }
 }
