@@ -5,6 +5,7 @@ import com.cafetron.order.repository.OrderRepository;
 import com.cafetron.orderQR.dto.DecodeQRResponse;
 import com.cafetron.orderQR.dto.GenQRResponse;
 import com.cafetron.orderQR.dto.QRRequest;
+import com.cafetron.orderQR.exception.QRDecodeException;
 import com.cafetron.orderQR.service.OrderQRService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -47,14 +48,21 @@ public class OrderQRController {
 
     @PostMapping
     public ResponseEntity<DecodeQRResponse> decodeQR(@RequestParam("qr") MultipartFile file) {
-        String token = orderQRService.decodeQRFromImage(file);
+        String token;
+
+        try {
+            token = orderQRService.decodeQRFromImage(file);
+        } catch (QRDecodeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new DecodeQRResponse(false, null, e.getMessage()));
+        }
 
         if ( token == null ) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(new DecodeQRResponse(false, null, "Failed to decode QR code"));
         }
 
-        boolean doesOrderExist = ( orderRepository.findByToken(token).orElse(null) != null );
+        boolean doesOrderExist = orderRepository.findByToken(token).isPresent();
 
         if ( !doesOrderExist ) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
