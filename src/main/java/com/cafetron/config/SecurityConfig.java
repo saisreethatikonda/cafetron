@@ -57,7 +57,7 @@ public class SecurityConfig {
                         .authenticationEntryPoint(customAuthEntryPoint))
                 .authorizeHttpRequests(auth -> auth
 
-                        //Temporarily commented for ease of development.
+                                //Temporarily commented for ease of development.
 
 //                        // Public routes
 //                        .requestMatchers(
@@ -81,9 +81,17 @@ public class SecurityConfig {
 //                        .anyRequest().authenticated()
 
                                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                                .requestMatchers(HttpMethod.POST,
+                                        "/api/auth/register",
+                                        "/api/auth/login",
+                                        "/auth/register",
+                                        "/auth/login"
+                                ).permitAll()
                                 .requestMatchers(
                                         "/api/auth/register",
-                                        "/api/auth/login"
+                                        "/api/auth/login",
+                                        "/auth/register",
+                                        "/auth/login"
                                 ).permitAll()
                                 .requestMatchers("/api/admin/**", "/api/dev/**").hasRole("ADMIN")
                                 .requestMatchers("/api/vendor/orders/**").hasAnyRole("VENDOR", "ADMIN")
