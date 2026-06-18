@@ -24,6 +24,7 @@ import com.cafetron.wallet.repository.TransactionRepository;
 import com.cafetron.wallet.repository.WalletRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +40,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/dev")
+@ConditionalOnProperty(name = "cafetron.dev-seed.enabled", havingValue = "true")
 public class DevSeedController {
 
     private static final String TEST_EMPLOYEE_ID = "E2E1001";

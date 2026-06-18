@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@CrossOrigin(origins = "http://localhost:4200")   // allow the Angular dev app
 @RestController
 @RequestMapping({"/menu", "/api/menu"})
 public class MenuItemController {

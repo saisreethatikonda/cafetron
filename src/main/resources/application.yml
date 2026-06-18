@@ -3,24 +3,29 @@ spring:
     name: cafetron-backend
 
   datasource:
-    url: jdbc:mysql://localhost:3306/cafetron?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    url: ${DB_URL:jdbc:mysql://localhost:3306/cafetron?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
     username: ${DB_USER:root}
     password: ${DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
       # Use 'update' in dev only. Switch to 'validate' + Flyway/Liquibase for real deployments.
-      ddl-auto: update
+      ddl-auto: ${DDL_AUTO:update}
     properties:
       hibernate:
         format_sql: true
-    show-sql: true
+    show-sql: ${SHOW_SQL:true}
 
 server:
-  port: 8081
+  address: 0.0.0.0
+  port: ${PORT:8081}
 
 # --- Application-specific config ---
 cafetron:
+  cors:
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:4200,http://127.0.0.1:4200}
+  dev-seed:
+    enabled: ${DEV_SEED_ENABLED:false}
   jwt:
     # Replace with a long random base64 secret in a real env (env var, not committed).
     secret: ${JWT_SECRET:Y2hhbmdlLW1lLXRoaXMtaXMtYS1kZXYtb25seS1zZWNyZXQtMTIzNDU2Nzg=}
