@@ -13,7 +13,7 @@ import java.util.List;
 @Configuration
 public class CorsConfig {
 
-    @Value("${cafetron.cors.allowed-origin-patterns:http://localhost:4200,http://127.0.0.1:4200}")
+    @Value("${cafetron.cors.allowed-origin-patterns:https://cafetron-backend-3aof.onrender.com/, http://localhost:4200,http://127.0.0.1:4200}")
     private String allowedOriginPatterns;
 
     @Bean
