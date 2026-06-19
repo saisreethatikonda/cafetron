@@ -23,11 +23,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.regex.Pattern;
 
 @Service
 public class AuthServiceImpl implements AuthService {
 
     private static final BigDecimal INITIAL_WALLET_BALANCE = new BigDecimal("1500.00");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", Pattern.CASE_INSENSITIVE);
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -61,23 +63,32 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse register(RegisterRequest request) {
         validateRegisterRequest(request);
 
-        if (userRepository.findByEmail(request.getEmail()).isPresent()) {
-            throw new IllegalStateException(
-                    "Email already in use: " + request.getEmail());
+        String email = request.getEmail().trim().toLowerCase();
+        String employeeId = request.getEmployeeId().trim();
+        String name = request.getName().trim();
+        String department = request.getDepartment() == null ? "" : request.getDepartment().trim();
+
+        boolean emailExists = userRepository.findByEmail(email).isPresent();
+        boolean employeeIdExists = userRepository.findByEmployeeId(employeeId).isPresent();
+
+        if (emailExists && employeeIdExists) {
+            throw new IllegalStateException("An account already exists with this email and employee ID.");
         }
 
-        if (userRepository.findByEmployeeId(
-                request.getEmployeeId()).isPresent()) {
-            throw new IllegalStateException(
-                    "Employee ID already in use: " + request.getEmployeeId());
+        if (emailExists) {
+            throw new IllegalStateException("Email already in use.");
+        }
+
+        if (employeeIdExists) {
+            throw new IllegalStateException("Employee ID already in use.");
         }
 
         User user = new User();
-        user.setName(request.getName());
-        user.setEmail(request.getEmail());
+        user.setName(name);
+        user.setEmail(email);
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
-        user.setEmployeeId(request.getEmployeeId());
-        user.setDepartment(request.getDepartment());
+        user.setEmployeeId(employeeId);
+        user.setDepartment(department);
         user.setRole(normalizeRole(request.getRole()));
         user.setCreatedAt(LocalDateTime.now());
 
@@ -167,8 +178,14 @@ public class AuthServiceImpl implements AuthService {
         if (request.getEmail() == null || request.getEmail().isBlank()) {
             throw new IllegalArgumentException("Email is required");
         }
+        if (!EMAIL_PATTERN.matcher(request.getEmail().trim()).matches()) {
+            throw new IllegalArgumentException("Enter a valid email address");
+        }
         if (request.getPassword() == null || request.getPassword().isBlank()) {
             throw new IllegalArgumentException("Password is required");
+        }
+        if (request.getPassword().trim().length() < 8) {
+            throw new IllegalArgumentException("Password must be at least 8 characters");
         }
         if (request.getEmployeeId() == null || request.getEmployeeId().isBlank()) {
             throw new IllegalArgumentException("Employee ID is required");
