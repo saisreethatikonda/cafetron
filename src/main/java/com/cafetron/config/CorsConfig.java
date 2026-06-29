@@ -13,14 +13,14 @@ import java.util.List;
 @Configuration
 public class CorsConfig {
 
-    @Value("${cafetron.cors.allowed-origin-patterns:https://cafetron-backend-3aof.onrender.com/, http://localhost:4200,http://127.0.0.1:4200}")
+    @Value("${cafetron.cors.allowed-origin-patterns:https://cafetron-backend-3aof.onrender.com/, http://localhost:4200,http://127.0.0.1:4200}, https://cafetron-app.netlify.app/")
     private String allowedOriginPatterns;
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        config.setAllowedOriginPatterns(List.of("https://cafetron-frontend-iy4p.vercel.app/"));
+        config.setAllowedOriginPatterns(List.of("https://cafetron-frontend-iy4p.vercel.app/", "https://cafetron-app.netlify.app/"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
